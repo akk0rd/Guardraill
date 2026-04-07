@@ -21,15 +21,38 @@ A Ukrainian-language PII detection and masking service built on [Microsoft Presi
 
 ## Features
 
+### Ukrainian (`language: "uk"`)
 | Entity | Example input | Masked output |
 |---|---|---|
-| Ukrainian passport | `АБ123456` / `AB123456` | `АБ******` |
-| Ukrainian phone | `+380951234567` / `0951234567` | `<PHONE>` |
-| Payment card (PAN) | `4111 1111 1111 1111` | `4111************` |
-| Ukrainian street address | `вул. Хрещатик 15` | `<ADDRESS>` |
-| Person name / surname | `Іван Петренко` | `<NAME>` |
+| `UKRAINIAN_PASSPORT` | `АБ123456` / `AB123456` | `АБ******` |
+| `UKRAINIAN_PHONE` | `+380951234567` / `0951234567` | `<PHONE>` |
+| `PAYMENT_CARD` | `4111 1111 1111 1111` | `4111************` |
+| `UKRAINIAN_ADDRESS` | `вул. Хрещатик 15` | `<ADDRESS>` |
+| `PERSON` (NER) | `Іван Петренко` | `<NAME>` |
 
-Person names are detected by the `uk_core_news_sm` spaCy NER model; all other entities use regex `PatternRecognizer`s with optional Luhn validation for payment cards.
+### Russian (`language: "ru"`)
+| Entity | Example input | Masked output |
+|---|---|---|
+| `RUSSIAN_PASSPORT` | `45 07 123456` | `45 07 ******` |
+| `RUSSIAN_PHONE` | `+79051234567` / `89051234567` | `<PHONE>` |
+| `PAYMENT_CARD` | `4111 1111 1111 1111` | `4111************` |
+| `RUSSIAN_ADDRESS` | `ул. Арбат 15` | `<ADDRESS>` |
+| `PERSON` (NER) | `Иван Петров` | `<NAME>` |
+
+### English (`language: "en"`)
+Powered by Presidio's built-in recognizers + `en_core_web_sm` NER:
+
+| Entity | Example input | Masked output |
+|---|---|---|
+| `CREDIT_CARD` | `4111111111111111` | `4111************` |
+| `EMAIL_ADDRESS` | `john@example.com` | `<EMAIL>` |
+| `PHONE_NUMBER` | `+1 650-253-0000` | `<PHONE>` |
+| `US_SSN` | `078-05-1120` | `*********` |
+| `US_PASSPORT` | `A12345678` | `<PASSPORT>` |
+| `IP_ADDRESS` | `192.168.1.1` | `<IP>` |
+| `PERSON` (NER) | `John Smith` | `<NAME>` |
+
+All payment card numbers are validated with the **Luhn algorithm** to eliminate false positives.
 
 ---
 
@@ -49,7 +72,11 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
-python -m spacy download uk_core_news_sm
+
+# Language models (all three recommended; service starts with whichever are installed)
+python -m spacy download uk_core_news_sm   # Ukrainian
+python -m spacy download en_core_web_sm    # English
+python -m spacy download ru_core_news_sm   # Russian
 ```
 
 ### Run
@@ -425,12 +452,16 @@ Guardraill/
 │   └── recognizers/
 │       ├── __init__.py
 │       ├── ukrainian_address.py   # вул. / просп. / пров. / бульв. / пл.
-│       ├── ukrainian_pan.py       # Payment card + Luhn validation
+│       ├── ukrainian_pan.py       # Payment card + Luhn validation (uk + ru)
 │       ├── ukrainian_passport.py  # АБ123456 / AB123456
-│       └── ukrainian_phone.py     # +380XX... / 0XX...
+│       ├── ukrainian_phone.py     # +380XX... / 0XX...
+│       ├── russian_address.py     # ул. / пр. / пер. / бул. / пл. / ш. / наб.
+│       ├── russian_passport.py    # 45 07 123456 / 4507 123456
+│       └── russian_phone.py       # +7XXX... / 8XXX...
 ├── tests/
-│   ├── test_api.py                # Integration tests (FastAPI TestClient)
-│   └── test_recognizers.py        # Unit tests per recognizer
+│   ├── test_api.py                # Integration tests (FastAPI TestClient) — uk/en/ru
+│   ├── test_recognizers.py        # Unit tests — Ukrainian recognizers
+│   └── test_russian_recognizers.py # Unit tests — Russian recognizers
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
