@@ -85,22 +85,96 @@ python -m spacy download ru_core_news_sm   # Russian
 uvicorn app.main:app --reload
 ```
 
-The service is available at **http://localhost:8000**.  
+The combined service is available at **http://localhost:8000** (both endpoints).  
 Interactive API docs (Swagger UI): **http://localhost:8000/docs**
+
+To run the split services on separate ports:
+
+```bash
+# Analyzer on port 5002
+uvicorn app.analyzer_app:app --reload --port 5002
+
+# Anonymizer on port 5001 (separate terminal)
+uvicorn app.anonymizer_app:app --reload --port 5001
+```
 
 ---
 
 ## Running with Docker
 
+### Standard build (requires internet access at build time)
+
 ```bash
-# Build and start
+# Build and start both services
 docker-compose up --build
 
 # Stop
 docker-compose down
 ```
 
-The container exposes port **8000** and automatically downloads `uk_core_news_sm` at build time.
+| Service | Port | Endpoint |
+|---|---|---|
+| Analyzer | **5002** | `POST /analyze` |
+| Anonymizer | **5001** | `POST /anonymize` |
+
+### Offline build (air-gapped environments)
+
+spaCy models are **not on PyPI** — `pip download uk-core-news-sm` hits a stub
+protection package and fails with a metadata error.  
+The models are `.whl` files distributed via GitHub Releases and must be
+downloaded with `curl` or `wget`.
+
+**Step 1 — download wheels on an internet-connected machine:**
+
+```bash
+bash scripts/download_models.sh
+# Creates spacy_models/uk_core_news_sm-3.7.0-py3-none-any.whl
+#         spacy_models/en_core_web_sm-3.7.1-py3-none-any.whl
+#         spacy_models/ru_core_news_sm-3.7.0-py3-none-any.whl
+```
+
+Or download manually:
+
+```bash
+mkdir -p spacy_models
+# Ukrainian
+curl -fSL -o spacy_models/uk_core_news_sm-3.7.0-py3-none-any.whl \
+  https://github.com/explosion/spacy-models/releases/download/uk_core_news_sm-3.7.0/uk_core_news_sm-3.7.0-py3-none-any.whl
+
+# English
+curl -fSL -o spacy_models/en_core_web_sm-3.7.1-py3-none-any.whl \
+  https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+
+# Russian
+curl -fSL -o spacy_models/ru_core_news_sm-3.7.0-py3-none-any.whl \
+  https://github.com/explosion/spacy-models/releases/download/ru_core_news_sm-3.7.0/ru_core_news_sm-3.7.0-py3-none-any.whl
+```
+
+**Step 2 — transfer `spacy_models/` to the air-gapped machine** alongside the
+rest of the repo (USB drive, internal artifact store, etc.).
+
+**Step 3 — build the offline image:**
+
+```bash
+docker build -f Dockerfile.offline -t guardraill:offline .
+```
+
+**Step 4 — run:**
+
+```bash
+# Both services
+docker run -p 5001:5001 -p 5002:5002 guardraill:offline
+
+# Individual services
+docker run -p 5002:5002 guardraill:offline \
+  uvicorn app.analyzer_app:app --host 0.0.0.0 --port 5002
+
+docker run -p 5001:5001 guardraill:offline \
+  uvicorn app.anonymizer_app:app --host 0.0.0.0 --port 5001
+```
+
+> **Note:** `spacy_models/*.whl` is listed in `.gitignore` — do not commit
+> binary model files to the repo.
 
 ---
 
@@ -634,7 +708,7 @@ curl -X POST http://localhost:8000/analyze \
 ## Running Tests
 
 ```bash
-# All tests (87 total)
+# All tests (93 total)
 pytest tests/ -v
 
 # Logging / audit subsystem only
@@ -659,12 +733,14 @@ pytest tests/ --cov=app --cov-report=term-missing
 Guardraill/
 ├── app/
 │   ├── __init__.py
+│   ├── analyzer_app.py            # Standalone analyzer service (port 5002)
+│   ├── anonymizer_app.py          # Standalone anonymizer service (port 5001)
 │   ├── audit.py                   # SIEM audit event emitter
 │   ├── config.py                  # Default operators and constants
 │   ├── context.py                 # Request-scoped ContextVar (user/session identity)
 │   ├── engine.py                  # Presidio AnalyzerEngine + AnonymizerEngine init
 │   ├── logging_config.py          # SIEM-ready JSON log formatter
-│   ├── main.py                    # FastAPI app and route handlers
+│   ├── main.py                    # Combined FastAPI app (dev / testing convenience)
 │   ├── middleware.py              # Request context extraction + lifecycle logging
 │   ├── models.py                  # Pydantic request / response models
 │   └── recognizers/
@@ -676,13 +752,17 @@ Guardraill/
 │       ├── russian_address.py     # ул. / пр. / пер. / бул. / пл. / ш. / наб.
 │       ├── russian_passport.py    # 45 07 123456 / 4507 123456
 │       └── russian_phone.py       # +7XXX... / 8XXX...
+├── scripts/
+│   └── download_models.sh         # Download spaCy .whl files for offline builds
 ├── tests/
 │   ├── test_api.py                # Integration tests (FastAPI TestClient) — uk/en/ru
 │   ├── test_logging.py            # Logging / audit subsystem tests
 │   ├── test_recognizers.py        # Unit tests — Ukrainian recognizers
 │   └── test_russian_recognizers.py # Unit tests — Russian recognizers
-├── Dockerfile
+├── Dockerfile                     # Online build (downloads models at build time)
+├── Dockerfile.offline             # Offline build (installs from spacy_models/*.whl)
 ├── docker-compose.yml
+├── start.sh                       # Launches both uvicorn processes
 ├── requirements.txt
 └── README.md
 ```

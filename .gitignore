@@ -16,3 +16,6 @@ build/
 *.log
 *.sqlite3
 .DS_Store
+
+# Pre-downloaded spaCy model wheels for offline Docker builds
+spacy_models/

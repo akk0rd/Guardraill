@@ -1,0 +1,37 @@
+# Offline build — spaCy models are installed from pre-downloaded .whl files.
+#
+# Prerequisites (run on an internet-connected machine first):
+#   bash scripts/download_models.sh
+# This creates spacy_models/*.whl next to this file.
+#
+# Build:
+#   docker build -f Dockerfile.offline -t guardraill:offline .
+#
+# Run (both services):
+#   docker run -p 5001:5001 -p 5002:5002 guardraill:offline
+#
+# Run individual services:
+#   docker run -p 5002:5002 guardraill:offline \
+#     uvicorn app.analyzer_app:app --host 0.0.0.0 --port 5002
+#   docker run -p 5001:5001 guardraill:offline \
+#     uvicorn app.anonymizer_app:app --host 0.0.0.0 --port 5001
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install spaCy models from pre-downloaded wheels (no network needed)
+COPY spacy_models/ /tmp/spacy_models/
+RUN pip install --no-cache-dir --no-index /tmp/spacy_models/*.whl \
+ && rm -rf /tmp/spacy_models
+
+COPY . .
+RUN chmod +x start.sh
+
+# Analyzer on 5002, Anonymizer on 5001
+EXPOSE 5001 5002
+
+CMD ["./start.sh"]
