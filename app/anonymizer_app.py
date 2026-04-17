@@ -1,18 +1,9 @@
 """
-Guardraill — Combined FastAPI App (development / single-process convenience)
-============================================================================
-
-In production use separate processes:
-  uvicorn app.analyzer_app:app  --host 0.0.0.0 --port 5002
-  uvicorn app.anonymizer_app:app --host 0.0.0.0 --port 5001
-
-This module mounts both sub-apps under a single ASGI app so tests that import
-``app.main.app`` continue to work without modification.
+Guardraill — Anonymizer Service (port 5001)
 
 Endpoints
 ---------
 GET  /health      — liveness check
-POST /analyze     — detect PII entities and return positions + scores
 POST /anonymize   — detect and mask PII, return anonymised text
 """
 
@@ -22,24 +13,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 
-from app.audit import (
-    emit_error,
-    emit_pii_analyzed,
-    emit_pii_anonymized,
-    summarize_entities,
-)
+from app.audit import emit_error, emit_pii_anonymized, summarize_entities
 from app.config import DEFAULT_OPERATORS
 from app.context import get_request_context
 from app.engine import analyzer, anonymizer
 from app.logging_config import setup_logging
 from app.middleware import RequestContextMiddleware
-from app.models import (
-    AnalyzeRequest,
-    AnalyzeResponse,
-    AnonymizeRequest,
-    AnonymizeResponse,
-    EntityResult,
-)
+from app.models import AnonymizeRequest, AnonymizeResponse
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -50,22 +30,19 @@ VERSION = "1.0.0"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(
-        "Guardraill service starting",
+        "Guardraill anonymizer service starting",
         extra={"service_version": VERSION, "event_type": "SERVICE_START"},
     )
     yield
     logger.info(
-        "Guardraill service stopped",
+        "Guardraill anonymizer service stopped",
         extra={"event_type": "SERVICE_STOP"},
     )
 
 
 app = FastAPI(
-    title="Guardraill",
-    description=(
-        "Ukrainian / Russian / English PII detection and masking service "
-        "powered by Microsoft Presidio."
-    ),
+    title="Guardraill Anonymizer",
+    description="Ukrainian / Russian / English PII masking service powered by Microsoft Presidio.",
     version=VERSION,
     lifespan=lifespan,
 )
@@ -73,67 +50,9 @@ app = FastAPI(
 app.add_middleware(RequestContextMiddleware)
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
-
 @app.get("/health", tags=["ops"])
 def health() -> dict:
-    return {"status": "ok", "version": VERSION}
-
-
-@app.post("/analyze", response_model=AnalyzeResponse, tags=["pii"])
-def analyze_text(request: AnalyzeRequest, http_request: Request) -> AnalyzeResponse:
-    """
-    Analyse *text* and return all detected PII entities with their
-    character offsets and confidence scores.
-    """
-    ctx = get_request_context()
-    start = time.monotonic()
-
-    try:
-        raw_results = analyzer.analyze(
-            text=request.text,
-            language=request.language,
-            entities=request.entities,
-            score_threshold=request.score_threshold,
-        )
-    except Exception as exc:
-        duration_ms = round((time.monotonic() - start) * 1000, 2)
-        emit_error(
-            ctx,
-            method=http_request.method,
-            path=http_request.url.path,
-            error=str(exc),
-            duration_ms=duration_ms,
-        )
-        logger.exception("Analysis failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    duration_ms = round((time.monotonic() - start) * 1000, 2)
-    entity_summary = summarize_entities(raw_results)
-
-    emit_pii_analyzed(
-        ctx,
-        language=request.language,
-        text_length=len(request.text),
-        score_threshold=request.score_threshold,
-        pii_detected=bool(raw_results),
-        total_entities=len(raw_results),
-        entity_summary=entity_summary,
-        duration_ms=duration_ms,
-    )
-
-    results = [
-        EntityResult(
-            entity_type=r.entity_type,
-            start=r.start,
-            end=r.end,
-            score=round(r.score, 4),
-            text=request.text[r.start : r.end],
-        )
-        for r in raw_results
-    ]
-    return AnalyzeResponse(results=results, total=len(results))
+    return {"status": "ok", "version": VERSION, "service": "anonymizer"}
 
 
 @app.post("/anonymize", response_model=AnonymizeResponse, tags=["pii"])
