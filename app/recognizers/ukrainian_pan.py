@@ -1,9 +1,6 @@
 from typing import Optional
 
 from presidio_analyzer import Pattern, PatternRecognizer
-from presidio_analyzer.predefined_recognizers.credit_card_recognizer import (
-    CreditCardRecognizer,
-)
 
 
 def _luhn_check(number: str) -> bool:
@@ -19,7 +16,7 @@ def _luhn_check(number: str) -> bool:
 
 class UkrainianPanRecognizer(PatternRecognizer):
     """
-    Recognizes payment card numbers (PAN) used in Ukraine.
+    Recognizes payment card numbers (PAN).
 
     Accepts 16-digit numbers written:
       - Continuously:          4111111111111111
@@ -28,6 +25,9 @@ class UkrainianPanRecognizer(PatternRecognizer):
 
     Applies Luhn algorithm validation to reduce false positives.
     Context words boost the score when found nearby.
+
+    Supports Ukrainian ("uk") and Russian ("ru") language contexts.
+    For English ("en") Presidio's built-in CreditCardRecognizer is used instead.
     """
 
     PATTERNS = [
@@ -44,26 +44,24 @@ class UkrainianPanRecognizer(PatternRecognizer):
         ),
     ]
 
-    CONTEXT = [
-        "карта",
-        "card",
-        "платіжна",
-        "кредитна",
-        "дебетова",
-        "visa",
-        "mastercard",
-        "банк",
-        "bank",
-        "оплата",
-        "payment",
-    ]
+    _CONTEXT_BY_LANG: dict = {
+        "uk": [
+            "карта", "card", "платіжна", "кредитна", "дебетова",
+            "visa", "mastercard", "банк", "bank", "оплата", "payment",
+        ],
+        "ru": [
+            "карта", "card", "платёжная", "кредитная", "дебетовая",
+            "visa", "mastercard", "банк", "bank", "оплата", "payment",
+        ],
+    }
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = "uk") -> None:
+        context = self._CONTEXT_BY_LANG.get(language, self._CONTEXT_BY_LANG["uk"])
         super().__init__(
             supported_entity="PAYMENT_CARD",
             patterns=self.PATTERNS,
-            context=self.CONTEXT,
-            supported_language="uk",
+            context=context,
+            supported_language=language,
         )
 
     def validate_result(self, pattern_text: str) -> Optional[bool]:

@@ -21,15 +21,38 @@ A Ukrainian-language PII detection and masking service built on [Microsoft Presi
 
 ## Features
 
+### Ukrainian (`language: "uk"`)
 | Entity | Example input | Masked output |
 |---|---|---|
-| Ukrainian passport | `АБ123456` / `AB123456` | `АБ******` |
-| Ukrainian phone | `+380951234567` / `0951234567` | `<PHONE>` |
-| Payment card (PAN) | `4111 1111 1111 1111` | `4111************` |
-| Ukrainian street address | `вул. Хрещатик 15` | `<ADDRESS>` |
-| Person name / surname | `Іван Петренко` | `<NAME>` |
+| `UKRAINIAN_PASSPORT` | `АБ123456` / `AB123456` | `АБ******` |
+| `UKRAINIAN_PHONE` | `+380951234567` / `0951234567` | `<PHONE>` |
+| `PAYMENT_CARD` | `4111 1111 1111 1111` | `4111************` |
+| `UKRAINIAN_ADDRESS` | `вул. Хрещатик 15` | `<ADDRESS>` |
+| `PERSON` (NER) | `Іван Петренко` | `<NAME>` |
 
-Person names are detected by the `uk_core_news_sm` spaCy NER model; all other entities use regex `PatternRecognizer`s with optional Luhn validation for payment cards.
+### Russian (`language: "ru"`)
+| Entity | Example input | Masked output |
+|---|---|---|
+| `RUSSIAN_PASSPORT` | `45 07 123456` | `45 07 ******` |
+| `RUSSIAN_PHONE` | `+79051234567` / `89051234567` | `<PHONE>` |
+| `PAYMENT_CARD` | `4111 1111 1111 1111` | `4111************` |
+| `RUSSIAN_ADDRESS` | `ул. Арбат 15` | `<ADDRESS>` |
+| `PERSON` (NER) | `Иван Петров` | `<NAME>` |
+
+### English (`language: "en"`)
+Powered by Presidio's built-in recognizers + `en_core_web_sm` NER:
+
+| Entity | Example input | Masked output |
+|---|---|---|
+| `CREDIT_CARD` | `4111111111111111` | `4111************` |
+| `EMAIL_ADDRESS` | `john@example.com` | `<EMAIL>` |
+| `PHONE_NUMBER` | `+1 650-253-0000` | `<PHONE>` |
+| `US_SSN` | `078-05-1120` | `*********` |
+| `US_PASSPORT` | `A12345678` | `<PASSPORT>` |
+| `IP_ADDRESS` | `192.168.1.1` | `<IP>` |
+| `PERSON` (NER) | `John Smith` | `<NAME>` |
+
+All payment card numbers are validated with the **Luhn algorithm** to eliminate false positives.
 
 ---
 
@@ -49,7 +72,11 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
-python -m spacy download uk_core_news_sm
+
+# Language models (all three recommended; service starts with whichever are installed)
+python -m spacy download uk_core_news_sm   # Ukrainian
+python -m spacy download en_core_web_sm    # English
+python -m spacy download ru_core_news_sm   # Russian
 ```
 
 ### Run
@@ -391,14 +418,230 @@ If you want callers to supply their own operator map, extend `AnonymizeRequest` 
 
 ---
 
+---
+
+## Logging & SIEM Integration
+
+### Overview
+
+Every request emits structured **single-line JSON** to stdout — no configuration required.  
+Log shippers pick up these lines and forward to any SIEM.
+
+```
+{"@timestamp":"2026-04-15T10:30:00.123Z","level":"WARN","logger":"guardrail.audit",
+ "message":"PII detected: 3 entities (UKRAINIAN_PASSPORT, UKRAINIAN_PHONE)",
+ "event_id":"…","event_type":"PII_DETECTED","log_type":"AUDIT",…}
+```
+
+Use `log_type = "AUDIT"` as the SIEM filter to separate security-relevant events
+from operational noise.
+
+---
+
+### Event types
+
+| `event_type` | `severity` | When emitted |
+|---|---|---|
+| `REQUEST_RECEIVED` | `INFO` | Middleware: request arrives |
+| `PII_ANALYZED` | `INFO` / `WARN`* | Route `/analyze` completes |
+| `PII_ANONYMIZED` | `INFO` / `WARN`* | Route `/anonymize` completes |
+| `REQUEST_COMPLETED` | `INFO` / `WARN` / `ERROR` | Middleware: response sent |
+| `REQUEST_ERROR` | `ERROR` | Unhandled exception in route |
+
+\* `WARN` when `pii_detected = true`, `INFO` when text is clean.
+
+---
+
+### Complete audit field reference
+
+#### Envelope (every event)
+
+| Field | Type | Example | Description |
+|---|---|---|---|
+| `@timestamp` | string | `2026-04-15T10:30:00.123Z` | ISO-8601 UTC |
+| `level` | string | `WARN` | Python log level |
+| `event_id` | string (UUID4) | `550e8400-…` | Unique event ID |
+| `event_type` | string | `PII_ANALYZED` | See table above |
+| `log_type` | string | `AUDIT` | Always `AUDIT` — use as SIEM filter |
+| `severity` | string | `WARN` | `INFO` / `WARN` / `ERROR` |
+| `service` | string | `guardrail` | Service name |
+| `service_version` | string | `1.0.0` | Deployed version |
+| `message` | string | `PII detected: 2 entities…` | Human-readable summary |
+
+#### Request context (every event)
+
+| Field | Type | Example | Description |
+|---|---|---|---|
+| `request_id` | string | `abc-123` | `X-Request-ID` or auto-generated UUID |
+| `client_ip` | string | `10.0.0.1` | Real IP (respects `X-Forwarded-For`) |
+| `user_agent` | string | `curl/7.88` | Raw `User-Agent` header |
+| `source` | string | `litellm` | `litellm` or `direct` |
+| `http_method` | string | `POST` | HTTP method |
+| `http_path` | string | `/anonymize` | Request path |
+| `http_status` | integer | `200` | Response status (`REQUEST_COMPLETED` only) |
+| `duration_ms` | float | `42.3` | Processing time in milliseconds |
+
+#### User / session identity
+
+| Field | Type | Source | Description |
+|---|---|---|---|
+| `user_id` | string | `x-litellm-user-id` | End-user ID from LiteLLM |
+| `team_id` | string | `x-litellm-team-id` | Team / department |
+| `org_id` | string | `x-litellm-organization-id` | Organisation |
+| `litellm_call_id` | string | `x-litellm-call-id` | LLM call being guarded |
+| `litellm_model` | string | `x-litellm-model` | LLM model name |
+| `litellm_key_hash` | string | `x-litellm-proxy-api-key-hash` | Hashed proxy key |
+| `api_key_id` | string | `X-API-Key` / `Authorization` | Last 8 chars of key (never the full secret) |
+
+#### PII detection fields (`PII_ANALYZED`, `PII_ANONYMIZED`)
+
+| Field | Type | Example | Description |
+|---|---|---|---|
+| `language` | string | `uk` | Language code passed in request |
+| `text_length` | integer | `245` | Input character count (no PII text) |
+| `score_threshold` | float | `0.5` | Minimum score used |
+| `pii_detected` | boolean | `true` | Whether any entity was found |
+| `total_entities` | integer | `3` | Total matched entities |
+| `entity_types` | list[string] | `["UKRAINIAN_PASSPORT","UKRAINIAN_PHONE"]` | Distinct entity types |
+| `entity_summary` | list[object] | `[{"type":"…","count":1,"score_max":0.85}]` | Per-type breakdown |
+
+> **Privacy contract:** PII text is never logged. Only metadata (lengths, types, scores) appears in logs.
+
+---
+
+### Log level control
+
+Set the `LOG_LEVEL` environment variable before starting the service:
+
+```bash
+LOG_LEVEL=DEBUG uvicorn app.main:app --reload   # verbose
+LOG_LEVEL=WARNING uvicorn app.main:app           # errors only
+```
+
+Default: `INFO`.
+
+---
+
+### SIEM integration examples
+
+#### Splunk (HTTP Event Collector)
+
+Configure a Filebeat/Vector shipper to read stdout and forward to Splunk HEC.  
+In Splunk, create a saved search alert:
+
+```spl
+index=guardrail log_type=AUDIT event_type=PII_ANONYMIZED pii_detected=true
+| stats count by user_id, entity_types
+| where count > 100
+```
+
+#### Elasticsearch / OpenSearch (ELK)
+
+Use Filebeat with the `json` input type:
+
+```yaml
+# filebeat.yml
+filebeat.inputs:
+  - type: container
+    paths: ['/var/lib/docker/containers/*/*.log']
+    processors:
+      - decode_json_fields:
+          fields: ["message"]
+          target: ""
+          overwrite_keys: true
+
+output.elasticsearch:
+  hosts: ["https://es:9200"]
+  index: "guardrail-audit-%{+yyyy.MM.dd}"
+```
+
+Kibana alert rule:
+
+```kql
+log_type: "AUDIT" AND event_type: "PII_ANALYZED" AND pii_detected: true AND severity: "WARN"
+```
+
+#### Microsoft Sentinel
+
+Use the **Azure Monitor Agent** or **Logstash** `logstash-output-azure-loganalytics` plugin.  
+Sample KQL detection rule:
+
+```kql
+guardrail_audit_CL
+| where log_type_s == "AUDIT"
+| where event_type_s == "PII_ANONYMIZED"
+| where pii_detected_b == true
+| summarize count() by user_id_s, bin(TimeGenerated, 1h)
+| where count_ > 50
+```
+
+#### QRadar (LEEF / Syslog)
+
+Use a **Universal DSM** that parses JSON syslog.  
+Filter expression:
+
+```
+"log_type" = 'AUDIT' AND "event_type" CONTAINS 'PII'
+```
+
+---
+
+### LiteLLM integration
+
+Add Guardraill as a LiteLLM input guardrail in `litellm_config.yaml`:
+
+```yaml
+guardrails:
+  - guardrail_name: guardraill-pii
+    litellm_params:
+      guardrail: custom
+      mode: pre_call          # or post_call, during_call
+      guardrail_endpoint: http://guardrail:8000/anonymize
+      default_on: true
+```
+
+When LiteLLM calls Guardraill it sends identifying headers automatically:
+
+```
+x-litellm-user-id:         <end-user-id>
+x-litellm-call-id:         <uuid>           ← used as request_id in logs
+x-litellm-team-id:         <team>
+x-litellm-organization-id: <org>
+x-litellm-model:           <model-name>
+```
+
+All these fields appear in every audit log event, making it straightforward to
+correlate a blocked/masked LLM call with the guardrail log entry.
+
+---
+
+### X-Request-ID header
+
+The service echoes `X-Request-ID` back in every response.  
+If the header is absent in the request, a UUID is generated.  
+For LiteLLM requests, `x-litellm-call-id` is used as the request ID automatically.
+
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -H "X-Request-ID: my-trace-id-001" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Паспорт АБ123456"}'
+# Response header: X-Request-ID: my-trace-id-001
+```
+
+---
+
 ## Running Tests
 
 ```bash
-# All tests
+# All tests (87 total)
 pytest tests/ -v
 
+# Logging / audit subsystem only
+pytest tests/test_logging.py -v
+
 # Only recognizer unit tests
-pytest tests/test_recognizers.py -v
+pytest tests/test_recognizers.py tests/test_russian_recognizers.py -v
 
 # Only API integration tests
 pytest tests/test_api.py -v
@@ -408,8 +651,6 @@ pip install pytest-cov
 pytest tests/ --cov=app --cov-report=term-missing
 ```
 
-Expected output: **44 passed**.
-
 ---
 
 ## Project Structure
@@ -418,19 +659,28 @@ Expected output: **44 passed**.
 Guardraill/
 ├── app/
 │   ├── __init__.py
+│   ├── audit.py                   # SIEM audit event emitter
 │   ├── config.py                  # Default operators and constants
+│   ├── context.py                 # Request-scoped ContextVar (user/session identity)
 │   ├── engine.py                  # Presidio AnalyzerEngine + AnonymizerEngine init
+│   ├── logging_config.py          # SIEM-ready JSON log formatter
 │   ├── main.py                    # FastAPI app and route handlers
+│   ├── middleware.py              # Request context extraction + lifecycle logging
 │   ├── models.py                  # Pydantic request / response models
 │   └── recognizers/
 │       ├── __init__.py
 │       ├── ukrainian_address.py   # вул. / просп. / пров. / бульв. / пл.
-│       ├── ukrainian_pan.py       # Payment card + Luhn validation
+│       ├── ukrainian_pan.py       # Payment card + Luhn validation (uk + ru)
 │       ├── ukrainian_passport.py  # АБ123456 / AB123456
-│       └── ukrainian_phone.py     # +380XX... / 0XX...
+│       ├── ukrainian_phone.py     # +380XX... / 0XX...
+│       ├── russian_address.py     # ул. / пр. / пер. / бул. / пл. / ш. / наб.
+│       ├── russian_passport.py    # 45 07 123456 / 4507 123456
+│       └── russian_phone.py       # +7XXX... / 8XXX...
 ├── tests/
-│   ├── test_api.py                # Integration tests (FastAPI TestClient)
-│   └── test_recognizers.py        # Unit tests per recognizer
+│   ├── test_api.py                # Integration tests (FastAPI TestClient) — uk/en/ru
+│   ├── test_logging.py            # Logging / audit subsystem tests
+│   ├── test_recognizers.py        # Unit tests — Ukrainian recognizers
+│   └── test_russian_recognizers.py # Unit tests — Russian recognizers
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt

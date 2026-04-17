@@ -152,3 +152,107 @@ def test_anonymize_response_structure():
     body = resp.json()
     assert "anonymized_text" in body
     assert "entities_found" in body
+
+
+# ---------------------------------------------------------------------------
+# English language
+# ---------------------------------------------------------------------------
+
+def test_english_analyze_detects_email():
+    resp = client.post(
+        "/analyze",
+        json={"text": "Contact me at john.doe@example.com", "language": "en"},
+    )
+    body = resp.json()
+    types = {e["entity_type"] for e in body["results"]}
+    assert "EMAIL_ADDRESS" in types
+
+
+def test_english_analyze_detects_phone():
+    resp = client.post(
+        "/analyze",
+        json={"text": "Call me at +1 650-253-0000", "language": "en", "score_threshold": 0.3},
+    )
+    body = resp.json()
+    types = {e["entity_type"] for e in body["results"]}
+    assert "PHONE_NUMBER" in types
+
+
+def test_english_analyze_detects_credit_card():
+    resp = client.post(
+        "/analyze",
+        json={"text": "My card is 4111111111111111", "language": "en"},
+    )
+    body = resp.json()
+    types = {e["entity_type"] for e in body["results"]}
+    assert "CREDIT_CARD" in types
+
+
+def test_english_anonymize_masks_email():
+    resp = client.post(
+        "/anonymize",
+        json={"text": "Email: john.doe@example.com", "language": "en"},
+    )
+    body = resp.json()
+    assert "john.doe@example.com" not in body["anonymized_text"]
+
+
+def test_english_anonymize_masks_credit_card():
+    resp = client.post(
+        "/anonymize",
+        json={"text": "Card: 4111111111111111", "language": "en"},
+    )
+    body = resp.json()
+    assert "4111111111111111" not in body["anonymized_text"]
+
+
+# ---------------------------------------------------------------------------
+# Russian language
+# ---------------------------------------------------------------------------
+
+def test_russian_analyze_detects_passport():
+    resp = client.post(
+        "/analyze",
+        json={"text": "Паспорт 45 07 123456 выдан в Москве", "language": "ru"},
+    )
+    body = resp.json()
+    types = {e["entity_type"] for e in body["results"]}
+    assert "RUSSIAN_PASSPORT" in types
+
+
+def test_russian_analyze_detects_phone():
+    resp = client.post(
+        "/analyze",
+        json={"text": "Телефон +79051234567", "language": "ru"},
+    )
+    body = resp.json()
+    types = {e["entity_type"] for e in body["results"]}
+    assert "RUSSIAN_PHONE" in types
+
+
+def test_russian_analyze_detects_address():
+    resp = client.post(
+        "/analyze",
+        json={"text": "Проживает по адресу ул. Арбат 15", "language": "ru"},
+    )
+    body = resp.json()
+    types = {e["entity_type"] for e in body["results"]}
+    assert "RUSSIAN_ADDRESS" in types
+
+
+def test_russian_anonymize_masks_phone():
+    resp = client.post(
+        "/anonymize",
+        json={"text": "Мобильный: +79051234567", "language": "ru"},
+    )
+    body = resp.json()
+    assert "+79051234567" not in body["anonymized_text"]
+
+
+def test_russian_anonymize_masks_address():
+    resp = client.post(
+        "/anonymize",
+        json={"text": "Адрес: ул. Арбат 15", "language": "ru"},
+    )
+    body = resp.json()
+    assert "ул. Арбат 15" not in body["anonymized_text"]
