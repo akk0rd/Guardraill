@@ -23,9 +23,17 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install spaCy models from pre-downloaded wheels (no network needed)
+# Install spaCy models and their dependencies from pre-downloaded wheels.
+# spacy_models/ contains:
+#   - model wheels (from GitHub Releases via curl)
+#   - pymorphy3, pymorphy3-dicts-uk, pymorphy3-dicts-ru (from PyPI via pip download)
+# --find-links points pip at the local directory; --no-index blocks PyPI.
 COPY spacy_models/ /tmp/spacy_models/
-RUN pip install --no-cache-dir --no-index /tmp/spacy_models/*.whl \
+RUN pip install --no-cache-dir --no-index \
+      --find-links /tmp/spacy_models \
+      /tmp/spacy_models/uk_core_news_sm-*.whl \
+      /tmp/spacy_models/en_core_web_sm-*.whl \
+      /tmp/spacy_models/ru_core_news_sm-*.whl \
  && rm -rf /tmp/spacy_models
 
 COPY . .
