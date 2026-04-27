@@ -1,11 +1,20 @@
-"""Integration tests for the FastAPI endpoints."""
+"""Integration tests for the FastAPI endpoints.
+
+Tests run against app.main (combined app) which hosts both /analyze and
+/anonymize.  Additional clients test the split analyzer_app and
+anonymizer_app independently to verify the port-split architecture.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.analyzer_app import app as analyzer_app
+from app.anonymizer_app import app as anonymizer_app
 
 client = TestClient(app)
+analyzer_client = TestClient(analyzer_app)
+anonymizer_client = TestClient(anonymizer_app)
 
 SAMPLE_TEXT = (
     "Іван Петренко, паспорт серії АБ123456, "
@@ -27,8 +36,24 @@ def test_health():
     assert "version" in body
 
 
+def test_analyzer_health():
+    resp = analyzer_client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "analyzer"
+
+
+def test_anonymizer_health():
+    resp = anonymizer_client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "anonymizer"
+
+
 # ---------------------------------------------------------------------------
-# /analyze
+# /analyze  (combined app)
 # ---------------------------------------------------------------------------
 
 def test_analyze_returns_200():
@@ -101,7 +126,24 @@ def test_analyze_no_pii():
 
 
 # ---------------------------------------------------------------------------
-# /anonymize
+# /analyze  (standalone analyzer_app on port 5002)
+# ---------------------------------------------------------------------------
+
+def test_analyzer_app_detects_passport():
+    resp = analyzer_client.post("/analyze", json={"text": "Паспорт АБ123456"})
+    assert resp.status_code == 200
+    types = {e["entity_type"] for e in resp.json()["results"]}
+    assert "UKRAINIAN_PASSPORT" in types
+
+
+def test_analyzer_app_no_anonymize_endpoint():
+    """The analyzer app must NOT expose /anonymize."""
+    resp = analyzer_client.post("/anonymize", json={"text": "Паспорт АБ123456"})
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /anonymize  (combined app)
 # ---------------------------------------------------------------------------
 
 def test_anonymize_returns_200():
@@ -152,6 +194,22 @@ def test_anonymize_response_structure():
     body = resp.json()
     assert "anonymized_text" in body
     assert "entities_found" in body
+
+
+# ---------------------------------------------------------------------------
+# /anonymize  (standalone anonymizer_app on port 5001)
+# ---------------------------------------------------------------------------
+
+def test_anonymizer_app_masks_passport():
+    resp = anonymizer_client.post("/anonymize", json={"text": "Паспорт АБ123456"})
+    assert resp.status_code == 200
+    assert "АБ123456" not in resp.json()["anonymized_text"]
+
+
+def test_anonymizer_app_no_analyze_endpoint():
+    """The anonymizer app must NOT expose /analyze."""
+    resp = anonymizer_client.post("/analyze", json={"text": "Паспорт АБ123456"})
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

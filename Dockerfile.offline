@@ -1,0 +1,45 @@
+# Offline build — spaCy models are installed from pre-downloaded .whl files.
+#
+# Prerequisites (run on an internet-connected machine first):
+#   bash scripts/download_models.sh
+# This creates spacy_models/*.whl next to this file.
+#
+# Build:
+#   docker build -f Dockerfile.offline -t guardraill:offline .
+#
+# Run (both services):
+#   docker run -p 5001:5001 -p 5002:5002 guardraill:offline
+#
+# Run individual services:
+#   docker run -p 5002:5002 guardraill:offline \
+#     uvicorn app.analyzer_app:app --host 0.0.0.0 --port 5002
+#   docker run -p 5001:5001 guardraill:offline \
+#     uvicorn app.anonymizer_app:app --host 0.0.0.0 --port 5001
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install spaCy models and their dependencies from pre-downloaded wheels.
+# spacy_models/ contains:
+#   - model wheels (from GitHub Releases via curl)
+#   - pymorphy3, pymorphy3-dicts-uk, pymorphy3-dicts-ru (from PyPI via pip download)
+# --find-links points pip at the local directory; --no-index blocks PyPI.
+COPY spacy_models/ /tmp/spacy_models/
+RUN pip install --no-cache-dir --no-index \
+      --find-links /tmp/spacy_models \
+      /tmp/spacy_models/uk_core_news_sm-*.whl \
+      /tmp/spacy_models/en_core_web_sm-*.whl \
+      /tmp/spacy_models/ru_core_news_sm-*.whl \
+ && rm -rf /tmp/spacy_models
+
+COPY . .
+RUN chmod +x start.sh
+
+# Analyzer on 5002, Anonymizer on 5001
+EXPOSE 5001 5002
+
+CMD ["./start.sh"]

@@ -1,10 +1,20 @@
 version: "3.9"
 
 services:
-  guardrail:
+  guardrail-analyzer:
     build: .
+    command: uvicorn app.analyzer_app:app --host 0.0.0.0 --port 5002
     ports:
-      - "8000:8000"
+      - "5002:5002"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  guardrail-anonymizer:
+    build: .
+    command: uvicorn app.anonymizer_app:app --host 0.0.0.0 --port 5001
+    ports:
+      - "5001:5001"
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

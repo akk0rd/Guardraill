@@ -12,5 +12,9 @@ RUN python -m spacy download ru_core_news_sm
 
 COPY . .
 
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+RUN chmod +x start.sh
+
+# Analyzer on 5002, Anonymizer on 5001
+EXPOSE 5001 5002
+
+CMD ["./start.sh"]
