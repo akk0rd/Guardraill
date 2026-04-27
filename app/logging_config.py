@@ -90,6 +90,14 @@ def setup_logging(level: str | None = None) -> None:
     root.handlers = [handler]
     root.setLevel(numeric_level)
 
-    # Quiet noisy third-party loggers
-    for noisy in ("uvicorn.access", "uvicorn.error", "presidio_analyzer"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+    # Quiet noisy third-party loggers.
+    # presidio-analyzer emits WARNING for every entity type that has no
+    # recognizer in the requested language (e.g. ES_NIE, IT_PASSPORT when
+    # language="en"). These are expected and not actionable.
+    for noisy in (
+        "uvicorn.access",
+        "uvicorn.error",
+        "presidio_analyzer",   # underscore variant
+        "presidio-analyzer",   # hyphen variant (actual runtime name)
+    ):
+        logging.getLogger(noisy).setLevel(logging.ERROR)
